@@ -12,6 +12,7 @@ from .serializers import NoticiaSerializer
 class NoticiaViewSet(viewsets.ModelViewSet):
     serializer_class = NoticiaSerializer
     queryset = Noticia.objects.all()
+    search_fields = ["titulo", "resumen", "contenido"]
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

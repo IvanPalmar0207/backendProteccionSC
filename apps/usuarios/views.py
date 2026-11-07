@@ -64,3 +64,4 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
     serializer_class = AdminUsuarioSerializer
     permission_classes = [IsAdministrador]
     http_method_names = ["get", "patch", "put", "head", "options"]
+    search_fields = ["email", "nombre_completo"]

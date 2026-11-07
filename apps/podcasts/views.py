@@ -10,6 +10,7 @@ from .serializers import PodcastSerializer
 class PodcastViewSet(viewsets.ModelViewSet):
     serializer_class = PodcastSerializer
     queryset = Podcast.objects.all()
+    search_fields = ["titulo", "programa", "descripcion"]
 
     def get_permissions(self):
         from apps.core.permissions import IsAdministrador
