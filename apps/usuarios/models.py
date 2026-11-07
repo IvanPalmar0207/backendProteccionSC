@@ -83,3 +83,35 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     @property
     def es_usuario(self) -> bool:
         return self.role == RolChoices.USUARIO
+
+
+class TokenRecuperacion(models.Model):
+    """Single-use password recovery token.
+
+    Only the SHA-256 hash of the token is stored, so a database leak does not
+    expose usable recovery links. A token is valid until it expires or is
+    consumed, whichever comes first.
+    """
+
+    usuario = models.ForeignKey(
+        Usuario,
+        on_delete=models.CASCADE,
+        related_name="tokens_recuperacion",
+        verbose_name="usuario",
+    )
+    token_hash = models.CharField("hash del token", max_length=64, unique=True)
+    creado_en = models.DateTimeField("creado en", auto_now_add=True)
+    expira_en = models.DateTimeField("expira en")
+    usado = models.BooleanField("usado", default=False)
+
+    class Meta:
+        verbose_name = "token de recuperación"
+        verbose_name_plural = "tokens de recuperación"
+        ordering = ["-creado_en"]
+
+    def __str__(self):
+        return f"Token de {self.usuario_id} ({'usado' if self.usado else 'vigente'})"
+
+    @property
+    def vigente(self) -> bool:
+        return not self.usado and self.expira_en > timezone.now()

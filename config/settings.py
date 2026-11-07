@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "channels",
     "apps.core",
@@ -124,11 +125,38 @@ TIME_ZONE = "America/Bogota"
 USE_I18N = True
 USE_TZ = True
 
+# --- Email -----------------------------------------------------------------
+# Development defaults to the console backend (the message is printed, never
+# actually sent). Configure SMTP in production through environment variables.
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend"
+    if DEBUG
+    else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL", "Protección Inmediata SC <no-responder@proteccioninmediata.test>"
+)
+
+# --- Password recovery -----------------------------------------------------
+# Public URL of the SPA, used to build the single-use recovery link.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:4200")
+PASSWORD_RESET_TIMEOUT_MINUTES = int(os.getenv("PASSWORD_RESET_TIMEOUT_MINUTES", "30"))
+# Anonymous rate limit for recovery requests, per client IP.
+PASSWORD_RESET_RATE = os.getenv("PASSWORD_RESET_RATE", "5/hour")
+
 # --- Static and media -----------------------------------------------------
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+# Maximum size accepted for uploaded images (validated in apps.core.validators).
+MAX_IMAGE_UPLOAD_MB = int(os.getenv("MAX_IMAGE_UPLOAD_MB", "5"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
