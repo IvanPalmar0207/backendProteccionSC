@@ -7,6 +7,8 @@ The frontend never decides whether a token is valid: it asks the backend
 import logging
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -89,6 +91,15 @@ class PasswordResetConfirmView(APIView):
         if registro is None or not registro.vigente:
             return Response(
                 {"detail": MENSAJE_TOKEN_INVALIDO}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Re-validate with the account context (similarity to email/name), the
+        # same rule used by registration.
+        try:
+            validate_password(serializer.validated_data["password"], user=registro.usuario)
+        except DjangoValidationError as error:
+            return Response(
+                {"password": list(error.messages)}, status=status.HTTP_400_BAD_REQUEST
             )
 
         consumir_token(registro, serializer.validated_data["password"])

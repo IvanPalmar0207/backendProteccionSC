@@ -3,10 +3,16 @@
 Running ``python manage.py seed_demo`` repeatedly must not create duplicates.
 Every object is looked up by a natural key (email, title, ...) before creation.
 All data is fictional: no real victim information is used.
+
+Demo accounts go through exactly the same password rules as a normal account
+(``validate_password`` with the account as context); if a demo password stops
+being compliant the command fails instead of weakening the system.
 """
 
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.chat.models import Conversacion, Mensaje
@@ -26,7 +32,7 @@ Usuario = get_user_model()
 CUENTAS = [
     {
         "email": "usuario@proteccioninmediata.test",
-        "password": "Usuario123*",
+        "password": "Sendero#Calido2026",
         "nombre_completo": "Valentina Gómez",
         "telefono": "3001234567",
         "documento": "1000000001",
@@ -34,7 +40,7 @@ CUENTAS = [
     },
     {
         "email": "profesional@proteccioninmediata.test",
-        "password": "Profesional123*",
+        "password": "Brujula#Serena2026",
         "nombre_completo": "Dra. Camila Restrepo",
         "telefono": "3007654321",
         "documento": "1000000002",
@@ -42,7 +48,7 @@ CUENTAS = [
     },
     {
         "email": "admin@proteccioninmediata.test",
-        "password": "Admin123*",
+        "password": "Faro#Seguro2026",
         "nombre_completo": "Andrés Administrador",
         "telefono": "3009998888",
         "documento": "1000000003",
@@ -59,6 +65,8 @@ NOTICIAS = [
             "encuentres acompañamiento profesional sin exponer tu identidad si "
             "no lo deseás."
         ),
+        "categoria": "DERECHOS",
+        "destacada": True,
     },
     {
         "titulo": "Cómo identificar una situación de violencia intrafamiliar",
@@ -67,6 +75,8 @@ NOTICIAS = [
             "Reconocer las señales es el primer paso. Esta guía resume indicadores "
             "y recuerda que denunciar de forma anónima también es posible."
         ),
+        "categoria": "PREVENCION",
+        "destacada": False,
     },
     {
         "titulo": "El acompañamiento psicosocial durante el proceso",
@@ -75,21 +85,26 @@ NOTICIAS = [
             "Un profesional puede orientarte, escucharte y ayudarte a tomar "
             "decisiones sin presionarte."
         ),
+        "categoria": "ACOMPANAMIENTO",
+        "destacada": False,
     },
 ]
 
+# Episodes are hosted externally: only validated HTTPS links are stored.
 PODCASTS = [
     {
         "titulo": "Episodio 1: Romper el silencio",
         "descripcion": "Conversación sobre el primer paso para pedir ayuda.",
-        "audio_url": "https://example.com/podcasts/episodio-1.mp3",
-        "duracion_segundos": 1450,
+        "programa": "Voces que acompañan",
+        "plataforma": "SPOTIFY",
+        "enlace": "https://open.spotify.com/episode/demo-episodio-1",
     },
     {
         "titulo": "Episodio 2: Redes de apoyo",
         "descripcion": "Cómo construir una red de apoyo segura.",
-        "audio_url": "https://example.com/podcasts/episodio-2.mp3",
-        "duracion_segundos": 1210,
+        "programa": "Voces que acompañan",
+        "plataforma": "YOUTUBE",
+        "enlace": "https://www.youtube.com/watch?v=demo-episodio-2",
     },
 ]
 
@@ -127,8 +142,6 @@ class Command(BaseCommand):
             usuario, creado = Usuario.objects.get_or_create(
                 email=datos["email"], defaults=defaults
             )
-            if creado or not usuario.check_password(password):
-                usuario.set_password(password)
             # Keep role/identity in sync on every run.
             usuario.role = datos["role"]
             usuario.nombre_completo = datos["nombre_completo"]
@@ -138,6 +151,18 @@ class Command(BaseCommand):
             if datos["role"] == "ADMINISTRADOR":
                 usuario.is_staff = True
                 usuario.is_superuser = True
+
+            # Demo accounts obey the same password rules as any other account.
+            try:
+                validate_password(password, user=usuario)
+            except ValidationError as error:
+                raise CommandError(
+                    f"La contraseña demo de {usuario.email} no cumple las reglas: "
+                    f"{'; '.join(error.messages)}"
+                )
+
+            if creado or not usuario.check_password(password):
+                usuario.set_password(password)
             usuario.save()
             cuentas[datos["role"]] = usuario
         return cuentas["ADMINISTRADOR"]
@@ -151,7 +176,7 @@ class Command(BaseCommand):
 
     def _crear_podcasts(self, admin):
         for datos in PODCASTS:
-            Podcast.objects.get_or_create(
+            Podcast.objects.update_or_create(
                 titulo=datos["titulo"],
                 defaults={**datos, "autor": admin, "publicado": True},
             )
@@ -173,7 +198,9 @@ class Command(BaseCommand):
         profesional = Usuario.objects.get(email="profesional@proteccioninmediata.test")
 
         publica_marca = "[demo] Situación en el hogar"
-        if not Denuncia.objects.filter(denunciante=usuario, descripcion__startswith=publica_marca).exists():
+        if not Denuncia.objects.filter(
+            denunciante=usuario, descripcion__startswith=publica_marca
+        ).exists():
             publica = Denuncia.objects.create(
                 denunciante=usuario,
                 modalidad=ModalidadChoices.PUBLICA,
@@ -198,7 +225,9 @@ class Command(BaseCommand):
             )
 
         anonima_marca = "[demo] Hechos de acoso"
-        if not Denuncia.objects.filter(denunciante=usuario, descripcion__startswith=anonima_marca).exists():
+        if not Denuncia.objects.filter(
+            denunciante=usuario, descripcion__startswith=anonima_marca
+        ).exists():
             Denuncia.objects.create(
                 denunciante=usuario,
                 modalidad=ModalidadChoices.ANONIMA,

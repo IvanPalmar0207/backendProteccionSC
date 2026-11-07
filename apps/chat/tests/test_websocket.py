@@ -48,8 +48,12 @@ class ChatWebSocketTests(TransactionTestCase):
         self.conversacion = Conversacion.objects.create(denuncia=self.denuncia)
         self.conversacion.participantes.add(self.duenio, self.profesional)
 
-    def _token(self, user):
-        return str(RefreshToken.for_user(user).access_token)
+        # Build tokens in this synchronous setup: with the token blacklist app
+        # enabled, RefreshToken.for_user writes to the database and cannot run
+        # inside the async test body.
+        self.token_duenio = str(RefreshToken.for_user(self.duenio).access_token)
+        self.token_profesional = str(RefreshToken.for_user(self.profesional).access_token)
+        self.token_intruso = str(RefreshToken.for_user(self.intruso).access_token)
 
     def test_participants_exchange_message_in_real_time(self):
         async_to_sync(self._run_exchange)()
@@ -57,10 +61,10 @@ class ChatWebSocketTests(TransactionTestCase):
     async def _run_exchange(self):
         url = f"/ws/chat/{self.conversacion.id}/"
         consumidor_a = WebsocketCommunicator(
-            test_application, url + f"?token={self._token(self.duenio)}"
+            test_application, url + f"?token={self.token_duenio}"
         )
         consumidor_b = WebsocketCommunicator(
-            test_application, url + f"?token={self._token(self.profesional)}"
+            test_application, url + f"?token={self.token_profesional}"
         )
         conectado_a, _ = await consumidor_a.connect()
         conectado_b, _ = await consumidor_b.connect()
@@ -80,7 +84,7 @@ class ChatWebSocketTests(TransactionTestCase):
         async_to_sync(self._run_rejection)()
 
     async def _run_rejection(self):
-        url = f"/ws/chat/{self.conversacion.id}/?token={self._token(self.intruso)}"
+        url = f"/ws/chat/{self.conversacion.id}/?token={self.token_intruso}"
         comunicador = WebsocketCommunicator(test_application, url)
         conectado, _ = await comunicador.connect()
         self.assertFalse(conectado)
@@ -91,7 +95,7 @@ class ChatWebSocketTests(TransactionTestCase):
     async def _run_persistence(self):
         from apps.chat.models import Mensaje
 
-        url = f"/ws/chat/{self.conversacion.id}/?token={self._token(self.duenio)}"
+        url = f"/ws/chat/{self.conversacion.id}/?token={self.token_duenio}"
         comunicador = WebsocketCommunicator(test_application, url)
         await comunicador.connect()
         await comunicador.send_json_to({"contenido": "Persistime"})

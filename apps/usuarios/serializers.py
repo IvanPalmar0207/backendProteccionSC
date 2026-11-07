@@ -2,6 +2,7 @@
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -31,7 +32,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     """Self-registration. New accounts always start with the USUARIO role."""
 
-    password = serializers.CharField(write_only=True, validators=[validate_password])
+    password = serializers.CharField(write_only=True)
     password_confirm = serializers.CharField(write_only=True)
 
     class Meta:
@@ -55,6 +56,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"password_confirm": "Las contraseñas no coinciden."}
             )
+        # Validate with the account context so similarity to the email or the
+        # name is also rejected, exactly like Django's password forms.
+        usuario_temporal = Usuario(
+            email=attrs.get("email", ""),
+            nombre_completo=attrs.get("nombre_completo", ""),
+        )
+        try:
+            validate_password(attrs["password"], user=usuario_temporal)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"password": list(error.messages)})
         return attrs
 
     def create(self, validated_data):
