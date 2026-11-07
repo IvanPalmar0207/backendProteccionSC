@@ -31,6 +31,20 @@ class SeguimientoSerializer(serializers.ModelSerializer):
         )
 
     def get_autor_nombre(self, obj):
+        request = self.context.get("request")
+        es_duenio = bool(
+            request
+            and request.user.is_authenticated
+            and request.user.id == obj.denuncia.denunciante_id
+        )
+        # An anonymous report must never reveal the reporter through the
+        # follow-up author, not even indirectly to a professional.
+        if (
+            obj.denuncia.es_anonima
+            and obj.autor_id == obj.denuncia.denunciante_id
+            and not es_duenio
+        ):
+            return "Denunciante anónimo"
         if obj.autor is None:
             return "Sistema"
         # A professional's name is operational data, never the reporter identity.

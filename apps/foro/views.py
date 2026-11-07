@@ -5,7 +5,7 @@ edit or delete their own content. Administrators can manage every publication
 and reply (HU-08.5).
 """
 
-from rest_framework import status, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission, IsAuthenticated
@@ -51,6 +51,7 @@ class PublicacionViewSet(viewsets.ModelViewSet):
 
 
 class RespuestaViewSet(
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     """Deletion of a reply by its author or an administrator."""

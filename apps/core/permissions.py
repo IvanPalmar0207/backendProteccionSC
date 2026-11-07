@@ -6,8 +6,10 @@ from rest_framework.permissions import BasePermission
 class RolePermission(BasePermission):
     """Base class: allow only authenticated users with a matching role.
 
-    Subclasses ``BasePermission`` so DRF object-level checks work too: role is
-    a view-level decision, so object checks inherit the same role test.
+    Deliberately no ``is_superuser`` bypass: roles are exclusive, so an
+    administrator is not implicitly a professional (and must not reach the
+    attention module). Superusers created through the platform carry the
+    ADMINISTRADOR role, so they still pass ``IsAdministrador``.
     """
 
     role = None
@@ -17,7 +19,7 @@ class RolePermission(BasePermission):
         return bool(
             user
             and user.is_authenticated
-            and (user.is_superuser or getattr(user, "role", None) == self.role)
+            and getattr(user, "role", None) == self.role
         )
 
     def has_object_permission(self, request, view, obj):
