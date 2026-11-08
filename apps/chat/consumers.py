@@ -33,6 +33,19 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         if not await self._puede_participar():
             await self.close(code=4403)
             return
+        if await self._esta_finalizada():
+            # Reject the write but keep the socket for consulting history.
+            await self.send_json(
+                {
+                    "tipo": "error",
+                    "code": "denuncia_completada",
+                    "detail": (
+                        "Esta denuncia ha sido completada. Puedes consultar el "
+                        "historial, pero ya no es posible enviar mensajes."
+                    ),
+                }
+            )
+            return
         contenido = (content.get("contenido") or "").strip()
         if not contenido:
             return
@@ -42,21 +55,76 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def chat_message(self, event):
-        await self.send_json({"tipo": "mensaje", "mensaje": event["mensaje"]})
+        # Re-check on delivery: a reassignment revokes the previous professional
+        # immediately, not only when the socket was opened.
+        if not await self._puede_participar():
+            await self.close(code=4403)
+            return
+        mensaje = event["mensaje"]
+        # Recompute anonymity per delivery so a modality change (public ->
+        # anonymous) is honored even on an already-open socket.
+        datos = await self._datos_denuncia()
+        usuario_id = getattr(self.scope.get("user"), "id", None)
+        remitente = mensaje.get("remitente") or {}
+        # The broadcast payload carries the real name; each connection masks the
+        # anonymous reporter before delivering, so the identity never leaves the
+        # server for anyone but the reporter themselves.
+        if (
+            datos.get("es_anonima")
+            and remitente.get("id") == datos.get("denunciante_id")
+            and usuario_id != datos.get("denunciante_id")
+        ):
+            mensaje = {
+                **mensaje,
+                "remitente": {**remitente, "nombre_completo": "Denunciante anónimo"},
+            }
+        await self.send_json({"tipo": "mensaje", "mensaje": mensaje})
+
+    @database_sync_to_async
+    def _datos_denuncia(self) -> dict:
+        from .models import Conversacion
+
+        conversacion = (
+            Conversacion.objects.select_related("denuncia")
+            .filter(pk=self.conversacion_id)
+            .first()
+        )
+        if conversacion is None:
+            return {"es_anonima": False, "denunciante_id": None}
+        return {
+            "es_anonima": conversacion.denuncia.es_anonima,
+            "denunciante_id": conversacion.denuncia.denunciante_id,
+        }
+
+    @database_sync_to_async
+    def _esta_finalizada(self) -> bool:
+        from .models import Conversacion
+
+        return Conversacion.objects.filter(
+            pk=self.conversacion_id, denuncia__estado="FINALIZADA"
+        ).exists()
 
     @database_sync_to_async
     def _puede_participar(self) -> bool:
+        """Only the reporter or the report's *current* assigned professional."""
         from .models import Conversacion
 
         usuario = self.scope.get("user")
         if not usuario or not getattr(usuario, "is_authenticated", False):
             return False
-        return Conversacion.objects.filter(
-            pk=self.conversacion_id, participantes=usuario
-        ).exists()
+        conversacion = (
+            Conversacion.objects.select_related("denuncia")
+            .filter(pk=self.conversacion_id)
+            .first()
+        )
+        if conversacion is None:
+            return False
+        return conversacion.acceso_permitido(usuario)
 
     @database_sync_to_async
     def _crear_mensaje(self, contenido: str) -> dict:
+        from apps.notificaciones.services import notificar_mensaje
+
         from .models import Conversacion, Mensaje
 
         conversacion = Conversacion.objects.get(pk=self.conversacion_id)
@@ -64,6 +132,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             conversacion=conversacion, remitente=self.scope["user"], contenido=contenido
         )
         conversacion.save(update_fields=["actualizado_en"])
+        notificar_mensaje(mensaje)
         return {
             "id": mensaje.id,
             "remitente": {

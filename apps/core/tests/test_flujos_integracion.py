@@ -9,6 +9,7 @@ import shutil
 import tempfile
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
@@ -28,15 +29,15 @@ class BaseFlujos(APITestCase):
             documento="CC-SECRETO",
             role="USUARIO",
         )
-        self.otro = Usuario.objects.create_user(
+        self.otro = Usuario.objects.create_user(documento=documento_unico(), 
             email="otro@test.dev", password="Sendero#Calido2026",
             nombre_completo="Otra Persona", role="USUARIO",
         )
-        self.profesional = Usuario.objects.create_user(
+        self.profesional = Usuario.objects.create_user(documento=documento_unico(), 
             email="prof@test.dev", password="Brujula#Serena2026",
             nombre_completo="Dra. Profesional", role="PROFESIONAL",
         )
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Faro#Seguro2026", nombre_completo="Admin"
         )
 
@@ -100,8 +101,8 @@ class FlujoA_DenunciaAnonima(BaseFlujos):
             "Valentina Denunciante", json.dumps(detalle.data, ensure_ascii=False)
         )
 
-        # 9-10. asignación, cambio de estado y sincronización con el usuario
-        self.assertEqual(prof.post(f"/api/denuncias/profesional/{denuncia_id}/asignarme/").status_code, 200)
+        # 9-10. el caso ya fue asignado automáticamente; cambio de estado y
+        # sincronización con el usuario.
         cambio = prof.post(
             f"/api/denuncias/profesional/{denuncia_id}/cambiar_estado/",
             {"estado": EstadoChoices.EN_PROCESO, "observacion": "En atención"},
@@ -147,8 +148,11 @@ class FlujoC_Chat(BaseFlujos):
         self.assertIn(abrir.status_code, (200, 201))
         conversacion_id = abrir.data["id"]
 
-        # A non-participant professional cannot read it yet.
-        self.assertEqual(prof.get(f"/api/chat/conversaciones/{conversacion_id}/mensajes/").status_code, 403)
+        # The case was auto-assigned to this professional, so they already have
+        # access to the thread.
+        self.assertEqual(
+            prof.get(f"/api/chat/conversaciones/{conversacion_id}/mensajes/").status_code, 200
+        )
 
         self.assertEqual(
             duenio.post(
@@ -206,10 +210,10 @@ class FlujoD_Contenidos(APITestCase):
         super().tearDownClass()
 
     def setUp(self):
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Faro#Seguro2026", nombre_completo="Admin"
         )
-        self.usuario = Usuario.objects.create_user(
+        self.usuario = Usuario.objects.create_user(documento=documento_unico(), 
             email="user@test.dev", password="Sendero#Calido2026", nombre_completo="User", role="USUARIO"
         )
 
@@ -285,13 +289,13 @@ class FlujoD_Contenidos(APITestCase):
 
 class FlujoE_Permisos(APITestCase):
     def setUp(self):
-        self.usuario = Usuario.objects.create_user(
+        self.usuario = Usuario.objects.create_user(documento=documento_unico(), 
             email="user@test.dev", password="Sendero#Calido2026", nombre_completo="User", role="USUARIO"
         )
-        self.profesional = Usuario.objects.create_user(
+        self.profesional = Usuario.objects.create_user(documento=documento_unico(), 
             email="prof@test.dev", password="Brujula#Serena2026", nombre_completo="Prof", role="PROFESIONAL"
         )
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Faro#Seguro2026", nombre_completo="Admin"
         )
 
@@ -319,6 +323,7 @@ class FlujoE_Permisos(APITestCase):
             {
                 "email": "nuevo@test.dev",
                 "nombre_completo": "Nuevo",
+                "documento": documento_unico(),
                 "password": "Sendero#Calido2026",
                 "password_confirm": "Sendero#Calido2026",
                 "role": "ADMINISTRADOR",
@@ -349,7 +354,7 @@ class FlujoE_Permisos(APITestCase):
             format="json",
         ).data["denuncia"]
 
-        otro = Usuario.objects.create_user(
+        otro = Usuario.objects.create_user(documento=documento_unico(), 
             email="intruso@test.dev", password="Sendero#Calido2026", nombre_completo="Intruso", role="USUARIO"
         )
         cliente_intruso = self._cliente(otro)

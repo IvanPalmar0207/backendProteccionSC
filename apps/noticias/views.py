@@ -32,6 +32,11 @@ class NoticiaViewSet(viewsets.ModelViewSet):
         destacada = self.request.query_params.get("destacada")
         if destacada is not None and destacada != "":
             queryset = queryset.filter(destacada=destacada.lower() in ("1", "true", "yes"))
+        # Administrative publication-state filter. For non-admins the queryset
+        # is already restricted to published rows, so a draft filter yields none.
+        publicado = self.request.query_params.get("publicado")
+        if publicado is not None and publicado != "":
+            queryset = queryset.filter(publicado=publicado.lower() in ("1", "true", "yes"))
         return queryset
 
     def perform_create(self, serializer):

@@ -3,6 +3,7 @@
 import json
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from rest_framework.test import APITestCase
 
 from apps.denuncias.models import Denuncia, ModalidadChoices, SeguimientoDenuncia, TipoSituacionChoices
@@ -20,13 +21,13 @@ class DenunciaBase(APITestCase):
             documento="CC-DUENIO",
             role="USUARIO",
         )
-        self.otro = Usuario.objects.create_user(
+        self.otro = Usuario.objects.create_user(documento=documento_unico(), 
             email="otro@test.dev", password="Usuario123*", nombre_completo="Otra", role="USUARIO"
         )
-        self.profesional = Usuario.objects.create_user(
+        self.profesional = Usuario.objects.create_user(documento=documento_unico(), 
             email="prof@test.dev", password="Prof123*", nombre_completo="Profesional", role="PROFESIONAL"
         )
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Admin123*", nombre_completo="Admin"
         )
 
@@ -78,7 +79,13 @@ class DenunciaCreacionTests(DenunciaBase):
 
     def test_creation_generates_followup_and_notification(self):
         response = self._crear(ModalidadChoices.PUBLICA)
-        self.assertEqual(SeguimientoDenuncia.objects.filter(denuncia_id=response.data["denuncia"]["id"]).count(), 1)
+        denuncia_id = response.data["denuncia"]["id"]
+        seguimientos = SeguimientoDenuncia.objects.filter(denuncia_id=denuncia_id)
+        # Creation entry + automatic assignment entry (a professional exists).
+        self.assertEqual(seguimientos.count(), 2)
+        self.assertTrue(
+            seguimientos.filter(observacion__startswith="Caso asignado").exists()
+        )
         self.client.force_authenticate(user=self.duenio)
         self.assertGreaterEqual(
             self.client.get("/api/notificaciones/no_leidas/").data["no_leidas"], 1
@@ -111,7 +118,6 @@ class DenunciaAislamientoTests(DenunciaBase):
         response = self._crear(ModalidadChoices.PUBLICA)
         report_id = response.data["denuncia"]["id"]
         self.client.force_authenticate(user=self.profesional)
-        self.client.post(f"/api/denuncias/profesional/{report_id}/asignarme/")
         self.client.post(
             f"/api/denuncias/profesional/{report_id}/cambiar_estado/",
             {"estado": "EN_PROCESO", "observacion": "En atención"},
@@ -202,15 +208,77 @@ class DenunciaEstadoTests(DenunciaBase):
         report_id = response.data["denuncia"]["id"]
         self.client.force_authenticate(user=self.profesional)
         self.client.post(f"/api/denuncias/profesional/{report_id}/asignarme/")
-        otro_prof = Usuario.objects.create_user(
+        otro_prof = Usuario.objects.create_user(documento=documento_unico(), 
             email="prof2@test.dev", password="Prof123*", nombre_completo="Prof 2", role="PROFESIONAL"
         )
         self.client.force_authenticate(user=otro_prof)
+        # 404 (not 403): a case assigned to another professional must not even
+        # be discoverable through the attention endpoint.
         self.assertEqual(
             self.client.post(
                 f"/api/denuncias/profesional/{report_id}/cambiar_estado/",
                 {"estado": "FINALIZADA"},
                 format="json",
             ).status_code,
-            403,
+            404,
+        )
+
+
+class ProfesionalCasosTests(DenunciaBase):
+    """A professional only reaches the cases assigned to them (S4)."""
+
+    def setUp(self):
+        super().setUp()
+        self.otro_prof = Usuario.objects.create_user(documento=documento_unico(), 
+            email="prof2@test.dev",
+            password="Prof123*",
+            nombre_completo="Prof 2",
+            role="PROFESIONAL",
+        )
+
+    def _crear_para(self, profesional):
+        respuesta = super()._crear(ModalidadChoices.PUBLICA)
+        denuncia = Denuncia.objects.get(pk=respuesta.data["denuncia"]["id"])
+        denuncia.profesional_asignado = profesional
+        denuncia.estado = "EN_PROCESO"
+        denuncia.save(update_fields=["profesional_asignado", "estado", "actualizado_en"])
+        return denuncia
+
+    def test_list_solo_muestra_los_casos_asignados(self):
+        propia = self._crear_para(self.profesional)
+        self._crear_para(self.otro_prof)
+        self.client.force_authenticate(user=self.profesional)
+        respuesta = self.client.get("/api/denuncias/profesional/")
+        ids = [denuncia["id"] for denuncia in respuesta.data["results"]]
+        self.assertEqual(ids, [propia.id])
+
+    def test_no_muestra_casos_pendientes_de_asignacion(self):
+        respuesta = super()._crear(ModalidadChoices.PUBLICA)
+        denuncia = Denuncia.objects.get(pk=respuesta.data["denuncia"]["id"])
+        denuncia.profesional_asignado = None
+        denuncia.save(update_fields=["profesional_asignado"])
+        self.client.force_authenticate(user=self.profesional)
+        self.assertEqual(self.client.get("/api/denuncias/profesional/").data["count"], 0)
+
+    def test_no_puede_ver_ni_cambiar_casos_ajenos(self):
+        ajena = self._crear_para(self.otro_prof)
+        self.client.force_authenticate(user=self.profesional)
+        self.assertEqual(
+            self.client.get(f"/api/denuncias/profesional/{ajena.id}/").status_code, 404
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/denuncias/profesional/{ajena.id}/cambiar_estado/",
+                {"estado": "FINALIZADA"},
+                format="json",
+            ).status_code,
+            404,
+        )
+
+    def test_el_endpoint_de_autoasignacion_ya_no_existe(self):
+        propia = self._crear_para(self.profesional)
+        self.client.force_authenticate(user=self.profesional)
+        self.assertEqual(
+            self.client.post(f"/api/denuncias/profesional/{propia.id}/asignarme/").status_code,
+            404,
         )

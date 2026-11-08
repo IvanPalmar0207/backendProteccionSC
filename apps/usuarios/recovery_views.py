@@ -31,9 +31,9 @@ Usuario = get_user_model()
 
 MENSAJE_GENERICO = (
     "Si el correo está registrado, te enviamos un enlace para restablecer tu "
-    "contraseña. Revisá tu bandeja de entrada."
+    "contraseña. Revisa tu bandeja de entrada."
 )
-MENSAJE_TOKEN_INVALIDO = "El enlace es inválido o expiró. Solicitá uno nuevo."
+MENSAJE_TOKEN_INVALIDO = "El enlace es inválido o expiró. Solicita uno nuevo."
 
 
 class PasswordResetRequestView(APIView):
@@ -104,6 +104,6 @@ class PasswordResetConfirmView(APIView):
 
         consumir_token(registro, serializer.validated_data["password"])
         return Response(
-            {"detail": "Contraseña actualizada correctamente. Ya podés iniciar sesión."},
+            {"detail": "Contraseña actualizada correctamente. Ya puedes iniciar sesión."},
             status=status.HTTP_200_OK,
         )

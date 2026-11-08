@@ -1,6 +1,7 @@
 """Podcast CRUD, permission and external-link validation tests (S14, S15, F2-S10)."""
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from rest_framework.test import APITestCase
 
 from apps.podcasts.models import Podcast
@@ -10,10 +11,10 @@ Usuario = get_user_model()
 
 class PodcastTests(APITestCase):
     def setUp(self):
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Admin123*", nombre_completo="Admin"
         )
-        self.usuario = Usuario.objects.create_user(
+        self.usuario = Usuario.objects.create_user(documento=documento_unico(), 
             email="user@test.dev", password="Usuario123*", nombre_completo="User", role="USUARIO"
         )
 
@@ -35,6 +36,36 @@ class PodcastTests(APITestCase):
     def test_draft_is_hidden_from_public(self):
         Podcast.objects.create(titulo="Borrador", enlace="https://example.com/a", publicado=False)
         self.assertEqual(self.client.get("/api/podcasts/").data["count"], 0)
+
+    def test_admin_filter_by_publication_state(self):
+        Podcast.objects.create(
+            titulo="Publicado", enlace="https://example.com/a", publicado=True
+        )
+        Podcast.objects.create(
+            titulo="Borrador", enlace="https://example.com/b", publicado=False
+        )
+        self.client.force_authenticate(user=self.admin)
+        publicados = self.client.get("/api/podcasts/?publicado=true")
+        self.assertEqual(publicados.data["count"], 1)
+        self.assertEqual(publicados.data["results"][0]["titulo"], "Publicado")
+        borradores = self.client.get("/api/podcasts/?publicado=false")
+        self.assertEqual(borradores.data["count"], 1)
+        self.assertEqual(borradores.data["results"][0]["titulo"], "Borrador")
+
+    def test_admin_combines_search_and_publication_state(self):
+        Podcast.objects.create(titulo="Salud pública", enlace="https://example.com/a", publicado=True)
+        Podcast.objects.create(titulo="Salud borrador", enlace="https://example.com/b", publicado=False)
+        Podcast.objects.create(titulo="Otra", enlace="https://example.com/c", publicado=True)
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get("/api/podcasts/", {"search": "Salud", "publicado": "false"})
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["titulo"], "Salud borrador")
+
+    def test_public_ignores_publication_filter(self):
+        Podcast.objects.create(
+            titulo="Borrador", enlace="https://example.com/b", publicado=False
+        )
+        self.assertEqual(self.client.get("/api/podcasts/?publicado=false").data["count"], 0)
 
     def test_usuario_cannot_manage_podcasts(self):
         podcast = Podcast.objects.create(titulo="P", enlace="https://example.com/a")

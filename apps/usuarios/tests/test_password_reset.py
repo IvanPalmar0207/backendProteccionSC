@@ -4,6 +4,7 @@ import re
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from django.core import mail
 from django.core.cache import cache
 from django.test import override_settings
@@ -27,7 +28,7 @@ def extraer_token(body: str) -> str:
 class PasswordResetTests(APITestCase):
     def setUp(self):
         cache.clear()
-        self.usuario = Usuario.objects.create_user(
+        self.usuario = Usuario.objects.create_user(documento=documento_unico(), 
             email="recuperacion@test.dev",
             password="Usuario123*",
             nombre_completo="Recuperación Prueba",

@@ -25,6 +25,9 @@ class PodcastViewSet(viewsets.ModelViewSet):
         es_admin = user.is_authenticated and user.role == "ADMINISTRADOR"
         if self.action in ("list", "retrieve") and not es_admin:
             queryset = queryset.filter(publicado=True)
+        publicado = self.request.query_params.get("publicado")
+        if publicado is not None and publicado != "":
+            queryset = queryset.filter(publicado=publicado.lower() in ("1", "true", "yes"))
         return queryset
 
     def perform_create(self, serializer):

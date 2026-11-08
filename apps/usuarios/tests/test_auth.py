@@ -1,6 +1,7 @@
 """Authentication and role tests (S7, S8, S20)."""
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from rest_framework.test import APITestCase
 
 Usuario = get_user_model()
@@ -13,6 +14,7 @@ class RegistrationTests(APITestCase):
             {
                 "email": "nueva@test.dev",
                 "nombre_completo": "Nueva Persona",
+                "documento": documento_unico(),
                 "password": "Usuario123*",
                 "password_confirm": "Usuario123*",
             },
@@ -23,12 +25,13 @@ class RegistrationTests(APITestCase):
         self.assertTrue(Usuario.objects.filter(email="nueva@test.dev").exists())
 
     def test_duplicate_email_is_rejected(self):
-        Usuario.objects.create_user(email="dup@test.dev", password="Usuario123*", nombre_completo="Dup")
+        Usuario.objects.create_user(documento=documento_unico(), email="dup@test.dev", password="Usuario123*", nombre_completo="Dup")
         response = self.client.post(
             "/api/auth/register/",
             {
                 "email": "dup@test.dev",
                 "nombre_completo": "Dup",
+                "documento": documento_unico(),
                 "password": "Usuario123*",
                 "password_confirm": "Usuario123*",
             },
@@ -43,6 +46,7 @@ class RegistrationTests(APITestCase):
             {
                 "email": "no-es-un-email",
                 "nombre_completo": "X",
+                "documento": documento_unico(),
                 "password": "Usuario123*",
                 "password_confirm": "Usuario123*",
             },
@@ -54,7 +58,7 @@ class RegistrationTests(APITestCase):
     def test_required_fields_are_validated(self):
         response = self.client.post("/api/auth/register/", {}, format="json")
         self.assertEqual(response.status_code, 400)
-        for field in ("email", "nombre_completo", "password"):
+        for field in ("email", "nombre_completo", "documento", "password"):
             self.assertIn(field, response.data)
 
     def test_password_mismatch_is_rejected(self):
@@ -63,6 +67,7 @@ class RegistrationTests(APITestCase):
             {
                 "email": "mismatch@test.dev",
                 "nombre_completo": "X",
+                "documento": documento_unico(),
                 "password": "Usuario123*",
                 "password_confirm": "Otro123*",
             },
@@ -77,6 +82,7 @@ class RegistrationTests(APITestCase):
             {
                 "email": "sneaky@test.dev",
                 "nombre_completo": "Sneaky",
+                "documento": documento_unico(),
                 "password": "Usuario123*",
                 "password_confirm": "Usuario123*",
                 "role": "ADMINISTRADOR",
@@ -89,7 +95,7 @@ class RegistrationTests(APITestCase):
 
 class LoginTests(APITestCase):
     def setUp(self):
-        self.usuario = Usuario.objects.create_user(
+        self.usuario = Usuario.objects.create_user(documento=documento_unico(), 
             email="login@test.dev", password="Usuario123*", nombre_completo="Login", role="USUARIO"
         )
 

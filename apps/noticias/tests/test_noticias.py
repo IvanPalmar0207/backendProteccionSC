@@ -4,6 +4,7 @@ import shutil
 import tempfile
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from django.test import override_settings
 from rest_framework.test import APITestCase
 
@@ -15,10 +16,10 @@ Usuario = get_user_model()
 
 class NoticiaTests(APITestCase):
     def setUp(self):
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Admin123*", nombre_completo="Admin"
         )
-        self.usuario = Usuario.objects.create_user(
+        self.usuario = Usuario.objects.create_user(documento=documento_unico(), 
             email="user@test.dev", password="Usuario123*", nombre_completo="User", role="USUARIO"
         )
 
@@ -37,6 +38,31 @@ class NoticiaTests(APITestCase):
         Noticia.objects.create(titulo="B", contenido="c", categoria="COMUNIDAD")
         response = self.client.get("/api/noticias/?categoria=PREVENCION")
         self.assertEqual(response.data["count"], 1)
+
+    def test_admin_filter_by_publication_state(self):
+        Noticia.objects.create(titulo="Publicada", contenido="c", publicado=True)
+        Noticia.objects.create(titulo="Borrador", contenido="c", publicado=False)
+        self.client.force_authenticate(user=self.admin)
+        publicadas = self.client.get("/api/noticias/?publicado=true")
+        self.assertEqual(publicadas.data["count"], 1)
+        self.assertEqual(publicadas.data["results"][0]["titulo"], "Publicada")
+        borradores = self.client.get("/api/noticias/?publicado=false")
+        self.assertEqual(borradores.data["count"], 1)
+        self.assertEqual(borradores.data["results"][0]["titulo"], "Borrador")
+
+    def test_admin_combines_search_and_publication_state(self):
+        Noticia.objects.create(titulo="Salud pública", contenido="c", publicado=True)
+        Noticia.objects.create(titulo="Salud borrador", contenido="c", publicado=False)
+        Noticia.objects.create(titulo="Otra", contenido="c", publicado=True)
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get("/api/noticias/", {"search": "Salud", "publicado": "false"})
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["titulo"], "Salud borrador")
+
+    def test_public_ignores_publication_filter(self):
+        Noticia.objects.create(titulo="Borrador", contenido="c", publicado=False)
+        # A non-admin cannot reach drafts even when explicitly asking for them.
+        self.assertEqual(self.client.get("/api/noticias/?publicado=false").data["count"], 0)
 
     def test_usuario_cannot_create_news(self):
         self.client.force_authenticate(user=self.usuario)
@@ -71,7 +97,7 @@ class NoticiaImagenTests(APITestCase):
         super().tearDownClass()
 
     def setUp(self):
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Admin123*", nombre_completo="Admin"
         )
         self.client.force_authenticate(user=self.admin)
@@ -126,7 +152,7 @@ class NoticiaImagenTests(APITestCase):
         self.assertFalse(noticia.imagen)
 
     def test_usuario_cannot_upload(self):
-        usuario = Usuario.objects.create_user(
+        usuario = Usuario.objects.create_user(documento=documento_unico(), 
             email="user@test.dev", password="Usuario123*", nombre_completo="User", role="USUARIO"
         )
         self.client.force_authenticate(user=usuario)

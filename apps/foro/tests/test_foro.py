@@ -1,6 +1,7 @@
 """Forum CRUD and permission tests (S14, S15, S20)."""
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from rest_framework.test import APITestCase
 
 from apps.foro.models import Publicacion, Respuesta
@@ -10,13 +11,13 @@ Usuario = get_user_model()
 
 class ForoTests(APITestCase):
     def setUp(self):
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Admin123*", nombre_completo="Admin"
         )
-        self.autor = Usuario.objects.create_user(
+        self.autor = Usuario.objects.create_user(documento=documento_unico(), 
             email="autor@test.dev", password="Usuario123*", nombre_completo="Autor", role="USUARIO"
         )
-        self.otro = Usuario.objects.create_user(
+        self.otro = Usuario.objects.create_user(documento=documento_unico(), 
             email="otro@test.dev", password="Usuario123*", nombre_completo="Otro", role="USUARIO"
         )
 
@@ -75,6 +76,22 @@ class ForoTests(APITestCase):
         )
         self.assertEqual(
             self.client.delete(f"/api/foro/publicaciones/{publicacion.id}/").status_code, 204
+        )
+
+    def test_admin_can_create_and_list_publications(self):
+        self.client.force_authenticate(user=self.admin)
+        created = self.client.post(
+            "/api/foro/publicaciones/",
+            {"titulo": "Anuncio oficial", "contenido": "Cuerpo del anuncio del foro"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["autor_nombre"], self.admin.nombre_completo)
+
+        listado = self.client.get("/api/foro/publicaciones/")
+        self.assertEqual(listado.status_code, 200)
+        self.assertTrue(
+            any(p["id"] == created.data["id"] for p in listado.data["results"])
         )
 
     def test_publications_include_replies(self):

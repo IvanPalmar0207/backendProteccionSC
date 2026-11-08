@@ -40,6 +40,21 @@ class Conversacion(TimeStampedModel):
             return False
         return self.participantes.filter(pk=usuario.pk).exists()
 
+    def acceso_permitido(self, usuario) -> bool:
+        """Only the reporter or the professional currently assigned.
+
+        The administrator is always denied (private chats stay private), and a
+        professional loses access as soon as the case is reassigned.
+        """
+        if not usuario or not usuario.is_authenticated:
+            return False
+        if usuario.role == "ADMINISTRADOR":
+            return False
+        denuncia = self.denuncia
+        if denuncia.denunciante_id == usuario.id:
+            return True
+        return denuncia.profesional_asignado_id == usuario.id
+
 
 class Mensaje(TimeStampedModel):
     """A persisted chat message."""

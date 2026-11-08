@@ -8,6 +8,7 @@ object-level ``EsParticipanteDeConversacion`` permission, so a non-participant
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -15,6 +16,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.denuncias.models import Denuncia
+from apps.denuncias.services import asegurar_editable
+from apps.notificaciones.services import notificar_mensaje
 
 from .models import Conversacion, Mensaje
 from .permissions import EsParticipanteDeConversacion
@@ -64,54 +67,65 @@ class ConversacionViewSet(
     permission_classes = [IsAuthenticated, EsParticipanteDeConversacion]
 
     def get_queryset(self):
-        queryset = Conversacion.objects.select_related("denuncia").prefetch_related(
-            "participantes"
+        queryset = Conversacion.objects.select_related(
+            "denuncia__denunciante", "denuncia__profesional_asignado"
         )
         if self.action == "list":
-            # Only the caller's conversations are even visible.
-            return queryset.filter(participantes=self.request.user)
+            usuario = self.request.user
+            # Only the reporter's or the currently assigned professional's.
+            return queryset.filter(
+                Q(denuncia__denunciante=usuario)
+                | Q(denuncia__profesional_asignado=usuario)
+            )
         return queryset
 
     def create(self, request, *args, **kwargs):
         denuncia_id = request.data.get("denuncia")
         if not denuncia_id:
             raise ValidationError({"denuncia": "Este campo es obligatorio."})
-        try:
-            denuncia = Denuncia.objects.get(pk=denuncia_id)
-        except (Denuncia.DoesNotExist, ValueError):
+        denuncia = (
+            Denuncia.objects.select_related("denunciante", "profesional_asignado")
+            .filter(pk=denuncia_id)
+            .first()
+        )
+        if denuncia is None:
             raise ValidationError({"denuncia": "La denuncia no existe."})
 
         usuario = request.user
         if usuario.role == ROL_ADMIN:
-            raise PermissionDenied("El administrador no puede acceder a los chats privados.")
-
+            raise PermissionDenied(
+                "El administrador no puede acceder a los chats privados."
+            )
         es_duenio = denuncia.denunciante_id == usuario.id
-        es_profesional = usuario.role == ROL_PROFESIONAL
-        if not (es_duenio or es_profesional):
-            raise PermissionDenied("No podés iniciar una conversación sobre esta denuncia.")
+        es_asignado = (
+            usuario.role == ROL_PROFESIONAL
+            and denuncia.profesional_asignado_id == usuario.id
+        )
+        # The owner always has access; a professional only when currently
+        # assigned. The administrator and any other professional are denied.
+        if not (es_duenio or es_asignado):
+            raise PermissionDenied(
+                "No tienes acceso a la conversación de esta denuncia."
+            )
 
         conversacion, creada = Conversacion.objects.get_or_create(denuncia=denuncia)
-        conversacion.participantes.add(denuncia.denunciante)
-        if es_profesional:
-            conversacion.participantes.add(usuario)
-            if denuncia.profesional_asignado_id is None:
-                denuncia.profesional_asignado = usuario
-                denuncia.save(update_fields=["profesional_asignado", "actualizado_en"])
-        elif denuncia.profesional_asignado_id:
-            conversacion.participantes.add(denuncia.profesional_asignado)
-
-        if not es_profesional and conversacion.participantes.count() < 2:
-            # The owner may open the thread before a professional is assigned;
-            # that is allowed and the professional joins later.
-            pass
+        # Keep the legacy M2M coherent with the current authorization scope.
+        participantes = [denuncia.denunciante]
+        if denuncia.profesional_asignado_id:
+            participantes.append(denuncia.profesional_asignado)
+        conversacion.participantes.set(participantes)
 
         serializer = self.get_serializer(conversacion)
-        return Response(serializer.data, status=status.HTTP_201_CREATED if creada else status.HTTP_200_OK)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED if creada else status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get", "post"])
     def mensajes(self, request, pk=None):
         conversacion = self.get_object()  # object permission -> 403 if not participant
         if request.method.lower() == "post":
+            asegurar_editable(conversacion.denuncia)  # 409 if already finished
             contenido = (request.data.get("contenido") or "").strip()
             if not contenido:
                 raise ValidationError({"contenido": "El mensaje no puede estar vacío."})
@@ -122,6 +136,7 @@ class ConversacionViewSet(
             )
             conversacion.save(update_fields=["actualizado_en"])
             broadcast_mensaje(mensaje)
+            notificar_mensaje(mensaje)
             return Response(_serializar_mensaje(mensaje), status=status.HTTP_201_CREATED)
 
         mensajes = conversacion.mensajes.select_related("remitente").order_by("creado_en")

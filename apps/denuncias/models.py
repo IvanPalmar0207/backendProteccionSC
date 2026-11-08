@@ -15,6 +15,7 @@ from django.conf import settings
 from django.db import models
 
 from apps.core.models import TimeStampedModel
+from apps.core.validators import validar_fecha_sucesos
 
 
 class ModalidadChoices(models.TextChoices):
@@ -25,7 +26,7 @@ class ModalidadChoices(models.TextChoices):
 class EstadoChoices(models.TextChoices):
     PENDIENTE = "PENDIENTE", "Pendiente"
     EN_PROCESO = "EN_PROCESO", "En proceso"
-    FINALIZADA = "FINALIZADA", "Finalizada"
+    FINALIZADA = "FINALIZADA", "Completada"
 
 
 class TipoSituacionChoices(models.TextChoices):
@@ -58,7 +59,12 @@ class Denuncia(TimeStampedModel):
     )
     descripcion = models.TextField("descripción de los hechos")
     ubicacion = models.CharField("ubicación", max_length=200, blank=True)
-    fecha_hechos = models.DateField("fecha de los hechos", null=True, blank=True)
+    fecha_hechos = models.DateField(
+        "fecha de los hechos",
+        null=True,
+        blank=True,
+        validators=[validar_fecha_sucesos],
+    )
     estado = models.CharField(
         "estado", max_length=15, choices=EstadoChoices.choices, default=EstadoChoices.PENDIENTE
     )

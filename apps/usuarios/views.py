@@ -2,6 +2,7 @@
 
 from django.contrib.auth import get_user_model
 from rest_framework import mixins, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -30,7 +31,7 @@ class RegisterView(APIView):
         user = serializer.save()
         return Response(
             {
-                "detail": "Cuenta creada correctamente. Ya podés iniciar sesión.",
+                "detail": "Cuenta creada correctamente. Ya puedes iniciar sesión.",
                 "user": UsuarioSerializer(user).data,
             },
             status=status.HTTP_201_CREATED,
@@ -65,3 +66,30 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdministrador]
     http_method_names = ["get", "patch", "put", "head", "options"]
     search_fields = ["email", "nombre_completo"]
+
+    def get_queryset(self):
+        queryset = Usuario.objects.all().order_by("id")
+        # The authenticated administrator is never part of the management list,
+        # so the UI cannot offer to deactivate their own account.
+        if self.action == "list":
+            queryset = queryset.exclude(pk=self.request.user.pk)
+        return queryset
+
+    @staticmethod
+    def _a_booleano(valor) -> bool:
+        if isinstance(valor, bool):
+            return valor
+        if isinstance(valor, int):
+            return bool(valor)
+        return str(valor).strip().lower() in ("true", "1", "yes", "si", "sí")
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # Identity is checked server-side: never trust the id sent by Angular.
+        if instance.pk == request.user.pk and request.data.get("is_active") is not None:
+            solicitado = self._a_booleano(request.data.get("is_active"))
+            if solicitado != instance.is_active:
+                raise ValidationError(
+                    {"is_active": "No puedes cambiar el estado de tu propia cuenta."}
+                )
+        return super().update(request, *args, **kwargs)

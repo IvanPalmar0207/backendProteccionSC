@@ -55,9 +55,9 @@ def enviar_correo_recuperacion(usuario: Usuario, raw_token: str) -> None:
     asunto = "Recuperación de contraseña · Protección Inmediata SC"
     mensaje = (
         "Recibimos una solicitud para restablecer la contraseña de tu cuenta.\n\n"
-        f"Abrí este enlace para crear una nueva contraseña:\n{enlace}\n\n"
+        f"Abre este enlace para crear una nueva contraseña:\n{enlace}\n\n"
         f"El enlace vence en {minutos} minutos y sólo puede usarse una vez.\n"
-        "Si no solicitaste el cambio, podés ignorar este correo."
+        "Si no solicitaste el cambio, puedes ignorar este correo."
     )
     send_mail(
         asunto,

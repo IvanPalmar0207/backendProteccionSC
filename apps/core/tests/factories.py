@@ -1,9 +1,22 @@
-"""Fictional in-memory files used by the upload tests."""
+"""Fictional in-memory files and test data used by the test suite."""
 
+import itertools
 from io import BytesIO
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
+
+_documento_seq = itertools.count(1)
+
+
+def documento_unico() -> str:
+    """Deterministic, unique document for test fixtures.
+
+    Keeps the value as a string so the leading-zero format is preserved. The
+    global counter guarantees two fixtures never collide under the database
+    unique constraint.
+    """
+    return f"DOC{next(_documento_seq):09d}"
 
 
 def png_bytes(size: tuple[int, int] = (16, 16)) -> bytes:

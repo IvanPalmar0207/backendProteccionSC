@@ -1,6 +1,7 @@
 """The Django admin must not expose the identity of an anonymous reporter."""
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from django.test import TestCase
 
 from apps.denuncias.models import Denuncia, ModalidadChoices, SeguimientoDenuncia, TipoSituacionChoices
@@ -18,7 +19,7 @@ class AdminPrivacidadTests(TestCase):
             documento="CC-ANONIMO",
             role="USUARIO",
         )
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Faro#Seguro2026", nombre_completo="Admin"
         )
         self.denuncia = Denuncia.objects.create(

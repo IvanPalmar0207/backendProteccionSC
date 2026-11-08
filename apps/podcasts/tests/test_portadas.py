@@ -5,6 +5,7 @@ import shutil
 import tempfile
 
 from django.contrib.auth import get_user_model
+from apps.core.tests.factories import documento_unico
 from django.test import override_settings
 from rest_framework.test import APITestCase
 
@@ -22,7 +23,7 @@ class PodcastPortadaTests(APITestCase):
         super().tearDownClass()
 
     def setUp(self):
-        self.admin = Usuario.objects.create_superuser(
+        self.admin = Usuario.objects.create_superuser(documento=documento_unico(), 
             email="admin@test.dev", password="Admin123*", nombre_completo="Admin"
         )
         self.client.force_authenticate(user=self.admin)

@@ -4,6 +4,8 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.db import models
 from django.utils import timezone
 
+from apps.core.validators import validar_fecha_nacimiento
+
 
 class RolChoices(models.TextChoices):
     USUARIO = "USUARIO", "Usuario"
@@ -19,6 +21,13 @@ class UsuarioManager(BaseUserManager):
     def _create_user(self, email, password, **extra_fields):
         if not email:
             raise ValueError("El correo electrónico es obligatorio.")
+        # The document is a mandatory identity field: no creation path may
+        # produce an account without one (an empty string would be a valid,
+        # and therefore colliding, unique value).
+        documento = (extra_fields.get("documento") or "").strip()
+        if not documento:
+            raise ValueError("El número de documento es obligatorio.")
+        extra_fields["documento"] = documento
         email = self.normalize_email(email).lower()
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
@@ -49,9 +58,15 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField("correo electrónico", unique=True)
     nombre_completo = models.CharField("nombre completo", max_length=150)
     telefono = models.CharField("teléfono", max_length=30, blank=True)
-    documento = models.CharField("documento", max_length=40, blank=True)
+    # Mandatory, unique identity field. Kept as text to preserve leading zeros.
+    documento = models.CharField("documento", max_length=40, unique=True)
     direccion = models.CharField("dirección", max_length=200, blank=True)
-    fecha_nacimiento = models.DateField("fecha de nacimiento", null=True, blank=True)
+    fecha_nacimiento = models.DateField(
+        "fecha de nacimiento",
+        null=True,
+        blank=True,
+        validators=[validar_fecha_nacimiento],
+    )
     role = models.CharField(
         "rol", max_length=20, choices=RolChoices.choices, default=RolChoices.USUARIO
     )
@@ -62,7 +77,7 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     objects = UsuarioManager()
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["nombre_completo"]
+    REQUIRED_FIELDS = ["nombre_completo", "documento"]
 
     class Meta:
         verbose_name = "usuario"

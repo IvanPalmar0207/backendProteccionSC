@@ -1,23 +1,24 @@
 """Report endpoints.
 
-Two separate viewsets keep the role split explicit:
+* ``DenunciaViewSet`` — the owner's own reports (role USUARIO). Creating one
+  auto-assigns the least-loaded active professional.
+* ``ProfesionalDenunciaViewSet`` — the attention module (role PROFESIONAL). A
+  professional only ever reaches reports assigned to them.
+* ``AdminDenunciaViewSet`` — administrative supervision and manual assignment
+  (anonymity-safe serializer; chat content is never exposed here).
 
-* ``DenunciaViewSet`` — the owner's own reports (role USUARIO).
-* ``ProfesionalDenunciaViewSet`` — the attention module (role PROFESIONAL),
-  which uses the anonymity-safe serializer.
-
-A user can never reach another account's reports because the queryset is
-filtered by ``request.user``. A professional can only see what the
-professional serializer renders, where anonymous reporters are ``None``.
+Identity is never leaked: the professional serializer renders ``solicitante``
+as ``None`` for anonymous reports, and the admin endpoint uses it too.
 """
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from apps.core.permissions import IsProfesional, IsUsuario
+from apps.core.permissions import IsAdministrador, IsProfesional, IsUsuario
 from apps.notificaciones.models import TipoNotificacionChoices
 from apps.notificaciones.services import notificar
 
@@ -27,6 +28,13 @@ from .serializers import (
     DenunciaEstadoUpdateSerializer,
     DenunciaProfesionalSerializer,
     DenunciaUsuarioSerializer,
+)
+from .services import (
+    asegurar_editable,
+    asignar_profesional_automatico,
+    profesionales_habilitados,
+    refrescar_seguimientos,
+    registrar_pendiente_de_asignacion,
 )
 
 Usuario = get_user_model()
@@ -54,13 +62,19 @@ class DenunciaViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        denuncia = serializer.save(denunciante=request.user)
-        SeguimientoDenuncia.objects.create(
-            denuncia=denuncia,
-            autor=request.user,
-            estado_nuevo=denuncia.estado,
-            observacion="Denuncia registrada.",
-        )
+        with transaction.atomic():
+            denuncia = serializer.save(denunciante=request.user)
+            SeguimientoDenuncia.objects.create(
+                denuncia=denuncia,
+                autor=request.user,
+                estado_nuevo=denuncia.estado,
+                observacion="Denuncia registrada.",
+            )
+            # Balanced automatic assignment; never from the client.
+            profesional = asignar_profesional_automatico(denuncia)
+            if profesional is None:
+                registrar_pendiente_de_asignacion(denuncia)
+        denuncia.refresh_from_db()
         notificar(
             request.user,
             "Denuncia registrada",
@@ -68,10 +82,20 @@ class DenunciaViewSet(viewsets.ModelViewSet):
             tipo=TipoNotificacionChoices.DENUNCIA,
             url=f"/usuario/denuncias/{denuncia.id}",
         )
+        if profesional is not None:
+            notificar(
+                profesional,
+                "Nuevo caso asignado",
+                f"Se te asignó la denuncia {denuncia.identificador}.",
+                tipo=TipoNotificacionChoices.DENUNCIA,
+                url=f"/profesional/denuncias/{denuncia.id}",
+            )
         return Response(
             {
                 "detail": "Denuncia registrada correctamente.",
-                "denuncia": DenunciaUsuarioSerializer(denuncia).data,
+                "denuncia": DenunciaUsuarioSerializer(
+                    denuncia, context={"request": request}
+                ).data,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -82,14 +106,17 @@ class ProfesionalDenunciaViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    """Attention module for professionals. Uses the anonymity-safe serializer."""
+    """Attention module: only the caller's assigned cases, always."""
 
     permission_classes = [IsProfesional]
     serializer_class = DenunciaProfesionalSerializer
 
     def get_queryset(self):
+        # Strict isolation: only reports currently assigned to the caller.
+        # Unassigned reports and other professionals' cases are invisible,
+        # including by direct id.
         queryset = (
-            Denuncia.objects.all()
+            Denuncia.objects.filter(profesional_asignado=self.request.user)
             .select_related("denunciante", "profesional_asignado")
             .prefetch_related("seguimientos")
         )
@@ -99,42 +126,17 @@ class ProfesionalDenunciaViewSet(
         modalidad = self.request.query_params.get("modalidad")
         if modalidad:
             queryset = queryset.filter(modalidad=modalidad)
-        solo_mias = self.request.query_params.get("mis_denuncias")
-        if solo_mias == "true":
-            queryset = queryset.filter(profesional_asignado=self.request.user)
         return queryset
 
     @action(detail=True, methods=["post"])
-    def asignarme(self, request, pk=None):
-        denuncia = self.get_object()
-        denuncia.profesional_asignado = request.user
-        if denuncia.estado == EstadoChoices.PENDIENTE:
-            estado_anterior = denuncia.estado
-            denuncia.estado = EstadoChoices.EN_PROCESO
-        else:
-            estado_anterior = denuncia.estado
-        denuncia.save(update_fields=["profesional_asignado", "estado", "actualizado_en"])
-        SeguimientoDenuncia.objects.create(
-            denuncia=denuncia,
-            autor=request.user,
-            estado_anterior=estado_anterior,
-            estado_nuevo=denuncia.estado,
-            observacion="Caso asignado a un profesional.",
-        )
-        return Response(self.get_serializer(denuncia).data)
-
-    @action(detail=True, methods=["post"])
     def cambiar_estado(self, request, pk=None):
-        denuncia = self.get_object()
-        if denuncia.profesional_asignado_id not in (None, request.user.id):
-            raise PermissionDenied("Este caso está asignado a otro profesional.")
+        denuncia = self.get_object()  # 404 unless assigned to the caller
+        asegurar_editable(denuncia)  # 409 if already finished
         serializer = DenunciaEstadoUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         estado_anterior = denuncia.estado
         denuncia.estado = serializer.validated_data["estado"]
-        if denuncia.profesional_asignado_id is None:
-            denuncia.profesional_asignado = request.user
-        denuncia.save(update_fields=["estado", "profesional_asignado", "actualizado_en"])
+        denuncia.save(update_fields=["estado", "actualizado_en"])
         SeguimientoDenuncia.objects.create(
             denuncia=denuncia,
             autor=request.user,
@@ -142,6 +144,7 @@ class ProfesionalDenunciaViewSet(
             estado_nuevo=denuncia.estado,
             observacion=serializer.validated_data.get("observacion", ""),
         )
+        refrescar_seguimientos(denuncia)
         notificar(
             denuncia.denunciante,
             "Tu denuncia fue actualizada",
@@ -149,5 +152,102 @@ class ProfesionalDenunciaViewSet(
             f"{denuncia.get_estado_display()}.",
             tipo=TipoNotificacionChoices.ESTADO,
             url=f"/usuario/denuncias/{denuncia.id}",
+        )
+        return Response(self.get_serializer(denuncia).data)
+
+
+class AdminDenunciaViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Administrative supervision and manual (re)assignment.
+
+    Uses the anonymity-safe serializer, so an anonymous reporter's identity is
+    never exposed. Administrators still cannot read private chats.
+    """
+
+    permission_classes = [IsAdministrador]
+    serializer_class = DenunciaProfesionalSerializer
+
+    def get_queryset(self):
+        queryset = (
+            Denuncia.objects.select_related("denunciante", "profesional_asignado")
+            .prefetch_related("seguimientos")
+        )
+        estado = self.request.query_params.get("estado")
+        if estado:
+            queryset = queryset.filter(estado=estado)
+        asignacion = self.request.query_params.get("asignacion")
+        if asignacion == "pendientes":
+            queryset = queryset.filter(profesional_asignado__isnull=True)
+        elif asignacion == "asignadas":
+            queryset = queryset.filter(profesional_asignado__isnull=False)
+        return queryset
+
+    @action(detail=False, methods=["get"])
+    def profesionales(self, request):
+        """Active professionals available for manual assignment."""
+        return Response(
+            [
+                {
+                    "id": profesional.id,
+                    "nombre_completo": profesional.nombre_completo,
+                    "casos_activos": profesional.casos_activos,
+                }
+                for profesional in profesionales_habilitados()
+            ]
+        )
+
+    @action(detail=True, methods=["post"])
+    def asignar(self, request, pk=None):
+        denuncia = self.get_object()
+        asegurar_editable(denuncia)  # 409 if already finished
+        profesional_id = request.data.get("profesional")
+        if profesional_id in (None, ""):
+            raise ValidationError({"profesional": "Este campo es obligatorio."})
+        profesional = Usuario.objects.filter(
+            pk=profesional_id, role="PROFESIONAL", is_active=True
+        ).first()
+        if profesional is None:
+            raise ValidationError(
+                {"profesional": "El profesional no existe o no está habilitado."}
+            )
+
+        with transaction.atomic():
+            anterior = denuncia.profesional_asignado
+            estado_anterior = denuncia.estado
+            denuncia.profesional_asignado = profesional
+            if denuncia.estado == EstadoChoices.PENDIENTE:
+                denuncia.estado = EstadoChoices.EN_PROCESO
+            denuncia.save(
+                update_fields=["profesional_asignado", "estado", "actualizado_en"]
+            )
+            if anterior is None:
+                observacion = (
+                    f"Caso asignado por administración a {profesional.nombre_completo}."
+                )
+            elif anterior.pk != profesional.pk:
+                observacion = (
+                    f"Reasignado de {anterior.nombre_completo} "
+                    f"a {profesional.nombre_completo}."
+                )
+            else:
+                observacion = "Asignación confirmada por administración."
+            SeguimientoDenuncia.objects.create(
+                denuncia=denuncia,
+                autor=request.user,
+                estado_anterior=estado_anterior,
+                estado_nuevo=denuncia.estado,
+                observacion=observacion,
+            )
+            refrescar_seguimientos(denuncia)
+        denuncia.refresh_from_db()
+        notificar(
+            profesional,
+            "Caso asignado",
+            f"Se te asignó la denuncia {denuncia.identificador}.",
+            tipo=TipoNotificacionChoices.DENUNCIA,
+            url=f"/profesional/denuncias/{denuncia.id}",
         )
         return Response(self.get_serializer(denuncia).data)

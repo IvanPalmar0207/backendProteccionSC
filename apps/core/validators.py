@@ -4,12 +4,69 @@ The frontend validates too, but the backend is the real boundary: uploaded
 files and external links are re-checked here.
 """
 
+import re
+from datetime import date
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
 EXTENSIONES_IMAGEN = {".jpg", ".jpeg", ".png", ".webp"}
 MIME_IMAGEN = {"image/jpeg", "image/png", "image/webp"}
+
+# Colombian phone: digits only, 7 to 10 of them (optional field).
+TELEFONO_PATTERN = re.compile(r"^[0-9]{7,10}$")
+
+
+EDAD_MINIMA_NACIMIENTO = 10
+
+
+def validar_fecha_sucesos(valor):
+    """The date something happened can never be in the future.
+
+    Optional field (``None`` allowed). Uses the project's local date so the
+    boundary respects ``TIME_ZONE``.
+    """
+    if valor in (None, ""):
+        return valor
+    if valor > timezone.localdate():
+        raise ValidationError(
+            "La fecha de los sucesos no puede ser posterior al día de hoy."
+        )
+    return valor
+
+
+def validar_fecha_nacimiento(valor):
+    """Reject future dates and people younger than the minimum age.
+
+    The birth date is optional (``None``/empty is allowed). Age is computed in
+    completed years against the server's current date, so it accounts for the
+    day and month (and leap years) instead of a hardcoded date.
+    """
+    if valor in (None, ""):
+        return valor
+    hoy = date.today()
+    if valor > hoy:
+        raise ValidationError("La fecha de nacimiento no puede ser futura.")
+    edad = hoy.year - valor.year - ((hoy.month, hoy.day) < (valor.month, valor.day))
+    if edad < EDAD_MINIMA_NACIMIENTO:
+        raise ValidationError(
+            "La persona debe tener al menos 10 años para registrarse."
+        )
+    return valor
+
+
+def validar_telefono(valor) -> str:
+    """Reject letters, spaces and symbols; keep the value as a digit string."""
+    if valor in (None, ""):
+        return ""
+    texto = str(valor)
+    if not TELEFONO_PATTERN.match(texto):
+        raise ValidationError(
+            "El teléfono debe contener solo números (entre 7 y 10 dígitos)."
+        )
+    return texto
 
 
 def validar_enlace_https(valor: str) -> None:
