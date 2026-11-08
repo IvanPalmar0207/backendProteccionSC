@@ -182,6 +182,26 @@ DEFAULT_FROM_EMAIL = os.getenv(
     "DEFAULT_FROM_EMAIL", "Protección Inmediata SC <no-responder@proteccioninmediata.test>"
 )
 
+# HTTP email provider. Railway blocks outbound SMTP (25/465/587), so real mail
+# is sent over HTTPS through a transactional provider. Set EMAIL_PROVIDER and
+# EMAIL_API_KEY (resend, sendgrid, brevo, mailgun, postmark or mailjet) and this
+# overrides the SMTP backend.
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "").strip().lower()
+EMAIL_API_KEY = os.getenv("EMAIL_API_KEY", "")
+if EMAIL_PROVIDER and EMAIL_API_KEY:
+    _claves_proveedor = {
+        "resend": "RESEND_API_KEY",
+        "sendgrid": "SENDGRID_API_KEY",
+        "brevo": "BREVO_API_KEY",
+        "mailgun": "MAILGUN_API_KEY",
+        "postmark": "POSTMARK_TOKEN",
+        "mailjet": "MAILJET_API_KEY",
+    }
+    EMAIL_BACKEND = f"anymail.backends.{EMAIL_PROVIDER}.EmailBackend"
+    ANYMAIL = {_claves_proveedor.get(EMAIL_PROVIDER, "RESEND_API_KEY"): EMAIL_API_KEY}
+    if EMAIL_PROVIDER == "mailgun":
+        ANYMAIL["MAILGUN_SENDER_DOMAIN"] = os.getenv("MAILGUN_SENDER_DOMAIN", "")
+
 # --- Password recovery -----------------------------------------------------
 # Public URL of the SPA, used to build the single-use recovery link.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:4200")
