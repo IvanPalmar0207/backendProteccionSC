@@ -15,7 +15,6 @@ db.sqlite3-journal
 # --- Environment / secrets ---
 .env
 .env.*
-!.env.example
 
 # --- Editors / OS ---
 .vscode/

@@ -1,7 +1,7 @@
 """
 Django settings for the Protección Inmediata SC backend.
 
-Configuration is environment-driven (see `.env.example`). PostgreSQL is the
+Configuration is environment-driven (see the README's variables section). PostgreSQL is the
 intended production database; SQLite is used automatically when `DB_ENGINE`
 is left at its default `sqlite` value.
 """

@@ -24,7 +24,7 @@ python -m venv .venv
 
 pip install -r requirements.txt
 
-copy .env.example .env            # Windows  (cp en Linux/macOS)  ← y completar valores
+# Crear un archivo .env con las variables de la sección "Configuración"
 python manage.py migrate
 python manage.py seed_demo        # datos de demostración idempotentes
 python manage.py runserver        # API en http://localhost:8000
@@ -32,10 +32,50 @@ python manage.py runserver        # API en http://localhost:8000
 
 ## Configuración (variables de entorno)
 
-Toda la configuración vive en `.env` (plantilla: `.env.example`). **`.env` está ignorado por
-Git y nunca debe versionarse.** Variables principales: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`,
-`DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `DB_ENGINE`/`POSTGRES_*`, `JWT_*`, `REDIS_URL`,
-`EMAIL_*`, `FRONTEND_URL`, `PASSWORD_RESET_*`, `MAX_IMAGE_UPLOAD_MB`.
+Toda la configuración vive en `.env`. **`.env` está ignorado por Git y nunca debe versionarse**
+(no se incluye ninguna plantilla en el repositorio). Creá el archivo con estas variables:
+
+```dotenv
+# Django
+DJANGO_SECRET_KEY=dev-insecure-secret-key-change-me
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+
+# CORS: orígenes permitidos para llamar a la API (dev server de Angular)
+CORS_ALLOWED_ORIGINS=http://localhost:4200,http://127.0.0.1:4200
+
+# Base de datos: "sqlite" (local por defecto) o "postgres" (producción)
+DB_ENGINE=sqlite
+POSTGRES_DB=proteccion_inmediata
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+
+# JWT
+JWT_ACCESS_MINUTES=60
+JWT_REFRESH_DAYS=7
+
+# Channels (vacío = channel layer en memoria para desarrollo local)
+REDIS_URL=
+
+# Correo (recuperación de contraseña; en desarrollo usa la consola)
+EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+EMAIL_HOST=localhost
+EMAIL_PORT=587
+EMAIL_HOST_USER=
+EMAIL_HOST_PASSWORD=
+EMAIL_USE_TLS=True
+DEFAULT_FROM_EMAIL=Proteccion Inmediata SC <no-responder@proteccioninmediata.test>
+
+# Recuperación de contraseña
+FRONTEND_URL=http://localhost:4200
+PASSWORD_RESET_TIMEOUT_MINUTES=30
+PASSWORD_RESET_RATE=5/hour
+
+# Subidas
+MAX_IMAGE_UPLOAD_MB=5
+```
 
 ## Estructura del proyecto
 
@@ -43,7 +83,6 @@ Git y nunca debe versionarse.** Variables principales: `DJANGO_SECRET_KEY`, `DJA
 backend/
 ├─ manage.py
 ├─ requirements.txt
-├─ .env.example              # plantilla (el .env real está ignorado)
 ├─ config/                   # proyecto Django
 │  ├─ settings.py            # configuración (lee variables de entorno)
 │  ├─ urls.py                # raíz de rutas (admin + /api + websocket)
@@ -107,7 +146,7 @@ python manage.py makemigrations --check --dry-run
 ## Seguridad
 
 - `.env`, `db.sqlite3`, `media/`, `.venv/` y artefactos están en `.gitignore`.
-- No se versionan credenciales ni secretos; solo `.env.example` como plantilla.
+- No se versionan credenciales ni secretos; la configuración vive en `.env` (fuera del repo).
 - Los datos de demostración (`seed_demo`) son ficticios.
 - La identidad de denunciantes anónimos nunca se expone por API ni por WebSocket.
 
