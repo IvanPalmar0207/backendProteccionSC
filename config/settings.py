@@ -12,6 +12,19 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
+try:  # optional: only required in production (Railway provides DATABASE_URL)
+    import dj_database_url
+
+except ImportError:  # pragma: no cover - local installs may omit it
+    dj_database_url = None
+
+try:  # optional: used to serve static files in production
+    import whitenoise  # noqa: F401
+
+    HAS_WHITENOISE = True
+except ImportError:  # pragma: no cover
+    HAS_WHITENOISE = False
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
@@ -59,6 +72,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Serves collected static files (Django admin, DRF) in production.
+    *(["whitenoise.middleware.WhiteNoiseMiddleware"] if HAS_WHITENOISE else []),
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -88,9 +103,27 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # --- Database -------------------------------------------------------------
-# Default: SQLite for local development. Set DB_ENGINE=postgres to use
-# PostgreSQL (the intended production engine).
-if os.getenv("DB_ENGINE", "sqlite").lower() == "postgres":
+# Priority: DATABASE_URL (Railway/Heroku style) > DB_ENGINE=postgres > SQLite.
+# SQLite stays available for local development only; production uses PostgreSQL.
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+# Use PostgreSQL when running in production (DEBUG=False). Locally we keep
+# SQLite even if DATABASE_URL is present in `.env`, so a production connection
+# string never breaks local development or the test suite. Set
+# USE_DATABASE_URL=True to force PostgreSQL locally if needed.
+USAR_DATABASE_URL = (
+    bool(DATABASE_URL)
+    and dj_database_url is not None
+    and (not DEBUG or env_bool("USE_DATABASE_URL", False))
+)
+if USAR_DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=env_bool("POSTGRES_SSL_REQUIRE", False),
+        )
+    }
+elif os.getenv("DB_ENGINE", "sqlite").lower() == "postgres":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -152,11 +185,21 @@ PASSWORD_RESET_RATE = os.getenv("PASSWORD_RESET_RATE", "5/hour")
 
 # --- Static and media -----------------------------------------------------
 STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = Path(os.getenv("STATIC_ROOT") or (BASE_DIR / "staticfiles"))
 MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# Uploaded files must live on a persistent volume in production (Railway
+# volume mounted at MEDIA_ROOT), never on the container's ephemeral filesystem.
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT") or (BASE_DIR / "media"))
 # Maximum size accepted for uploaded images (validated in apps.core.validators).
 MAX_IMAGE_UPLOAD_MB = int(os.getenv("MAX_IMAGE_UPLOAD_MB", "5"))
+
+if HAS_WHITENOISE:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+        },
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -185,6 +228,13 @@ CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS", "http://localhost:4200,http://127.0.0.1:4200"
 )
 CORS_ALLOW_CREDENTIALS = True
+
+# --- Security (production behind Railway's TLS proxy) ---------------------
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", not DEBUG)
 
 # --- Channels -------------------------------------------------------------
 # In-memory layer keeps local development dependency-free. Set REDIS_URL to

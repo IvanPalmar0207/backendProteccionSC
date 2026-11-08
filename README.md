@@ -75,6 +75,22 @@ PASSWORD_RESET_RATE=5/hour
 
 # Subidas
 MAX_IMAGE_UPLOAD_MB=5
+
+# --- Producción (Railway) ---
+# Railway provee DATABASE_URL al conectar PostgreSQL; tiene prioridad.
+DATABASE_URL=postgresql://usuario:clave@host:5432/base
+# Orígenes de confianza para CSRF (dominio del frontend en Vercel).
+CSRF_TRUSTED_ORIGINS=https://tu-frontend.vercel.app
+# Volumen persistente para multimedia (nunca el FS efímero del contenedor).
+MEDIA_ROOT=/data/media
+STATIC_ROOT=/app/staticfiles
+# TLS detrás del proxy de Railway.
+SECURE_SSL_REDIRECT=True
+SESSION_COOKIE_SECURE=True
+CSRF_COOKIE_SECURE=True
+POSTGRES_SSL_REQUIRE=False
+# Redis para el channel layer multi-proceso (plugin de Railway).
+# REDIS_URL=redis://...
 ```
 
 ## Estructura del proyecto
