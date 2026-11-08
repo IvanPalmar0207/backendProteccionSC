@@ -12,6 +12,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
+from django.core.exceptions import ImproperlyConfigured
+
 try:  # optional: only required in production (Railway provides DATABASE_URL)
     import dj_database_url
 
@@ -116,13 +118,15 @@ USAR_DATABASE_URL = (
     and (not DEBUG or env_bool("USE_DATABASE_URL", False))
 )
 if USAR_DATABASE_URL:
-    DATABASES = {
-        "default": dj_database_url.config(
-            default=DATABASE_URL,
-            conn_max_age=600,
-            ssl_require=env_bool("POSTGRES_SSL_REQUIRE", False),
-        )
-    }
+    _db = dj_database_url.config(
+        default=DATABASE_URL,
+        # No persistent connections: managed Postgres may sleep and close idle
+        # sockets, which would surface as "server closed the connection" 500s.
+        conn_max_age=0,
+        ssl_require=env_bool("POSTGRES_SSL_REQUIRE", False),
+    )
+    _db["CONN_HEALTH_CHECKS"] = True
+    DATABASES = {"default": _db}
 elif os.getenv("DB_ENGINE", "sqlite").lower() == "postgres":
     DATABASES = {
         "default": {
@@ -247,7 +251,13 @@ if REDIS_URL:
             "CONFIG": {"hosts": [REDIS_URL]},
         }
     }
-else:
+elif DEBUG:
+    # In-memory layer is for local development only.
     CHANNEL_LAYERS = {
         "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
     }
+else:
+    # Never silently fall back to memory in production.
+    raise ImproperlyConfigured(
+        "REDIS_URL es obligatorio en producción: no se permite el channel layer en memoria."
+    )
