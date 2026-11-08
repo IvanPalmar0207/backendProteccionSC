@@ -197,13 +197,20 @@ MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT") or (BASE_DIR / "media"))
 # Maximum size accepted for uploaded images (validated in apps.core.validators).
 MAX_IMAGE_UPLOAD_MB = int(os.getenv("MAX_IMAGE_UPLOAD_MB", "5"))
 
-if HAS_WHITENOISE:
-    STORAGES = {
-        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-        "staticfiles": {
-            "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
-        },
-    }
+# Media storage: filesystem by default; MEDIA_STORAGE=db keeps uploads in
+# PostgreSQL (persistent in production without a container volume/account).
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": (
+            "whitenoise.storage.CompressedStaticFilesStorage"
+            if HAS_WHITENOISE
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+        )
+    },
+}
+if os.getenv("MEDIA_STORAGE", "").strip().lower() == "db":
+    STORAGES["default"] = {"BACKEND": "apps.core.storage.DatabaseStorage"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
