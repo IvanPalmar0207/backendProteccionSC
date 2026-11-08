@@ -7,6 +7,8 @@ Enabled with ``MEDIA_STORAGE=db`` (see ``config/settings.py``).
 Files are served through ``apps.core.views.servir_media``.
 """
 
+import mimetypes
+
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
@@ -20,7 +22,11 @@ class DatabaseStorage(Storage):
 
         content.seek(0)
         datos = content.read()
-        content_type = getattr(content, "content_type", "") or ""
+        content_type = (
+            getattr(content, "content_type", "")
+            or mimetypes.guess_type(name)[0]
+            or ""
+        )
         StoredFile.objects.update_or_create(
             name=name,
             defaults={
